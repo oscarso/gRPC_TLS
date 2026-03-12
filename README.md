@@ -208,7 +208,7 @@ python3 client/py/client.py --host localhost --port 50051
 
 ## Native C++ gRPC client
 
-There is also a native client implementation at `client/cpp/client.cpp` (same as the older `client/cpp/client.cc`) that behaves like the Python client:
+There is also a native client implementation at `client/cpp/client.cpp` that behaves like the Python client:
 - prompts for `a` and `b`
 - calls `Adder.Add(a,b)`
 - prints the sum
@@ -238,15 +238,13 @@ c++ -std=c++17 \
   -Iclient/cpp \
   client/cpp/client.cpp client/cpp/add.pb.cc client/cpp/add.grpc.pb.cc \
   $(pkg-config --cflags --libs grpc++ protobuf) \
-  -o client/cpp/client_cpp
+  -o client/cpp/client_exe
 ```
-
-If you still have `client/cpp/client.cc`, you can compile it instead by replacing `client.cpp` with `client.cc` in the command above.
 
 ### Run the C++ client
 
 ```bash
-GRPC_HOST=localhost ./client/cpp/client_cpp
+GRPC_HOST=localhost ./client/cpp/client_exe
 ```
 
 TLS and mTLS are controlled by the same environment variables described above (`GRPC_TLS`, `GRPC_MTLS`, `GRPC_ROOT_CERT`, `GRPC_CLIENT_CERT`, `GRPC_CLIENT_KEY`, etc.).
