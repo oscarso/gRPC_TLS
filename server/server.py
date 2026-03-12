@@ -167,10 +167,12 @@ class Adder(add_pb2_grpc.AdderServicer):
 def serve_grpc(host: str, port: int) -> grpc.Server:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     add_pb2_grpc.add_AdderServicer_to_server(Adder(), server)
+
+    bind_host = "[::]" if host == "localhost" else host
     if _tls_enabled():
-        server.add_secure_port(f"{host}:{port}", _grpc_server_credentials())
+        server.add_secure_port(f"{bind_host}:{port}", _grpc_server_credentials())
     else:
-        server.add_insecure_port(f"{host}:{port}")
+        server.add_insecure_port(f"{bind_host}:{port}")
     server.start()
     return server
 

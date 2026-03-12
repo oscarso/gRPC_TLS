@@ -206,6 +206,51 @@ Optional flags:
 python3 client/py/client.py --host localhost --port 50051
 ```
 
+## Native C++ gRPC client
+
+There is also a native client implementation at `client/cpp/client.cpp` (same as the older `client/cpp/client.cc`) that behaves like the Python client:
+- prompts for `a` and `b`
+- calls `Adder.Add(a,b)`
+- prints the sum
+
+### Build the C++ client
+
+You need `protoc`, the gRPC C++ plugin, and the gRPC/protobuf libraries available on your system.
+
+1. Generate C++ protobuf + gRPC sources from `proto/add.proto`:
+
+```bash
+protoc -I proto \
+  --cpp_out=client/cpp \
+  --grpc_out=client/cpp \
+  --plugin=protoc-gen-grpc=$(which grpc_cpp_plugin) \
+  proto/add.proto
+```
+
+This will create:
+- `client/cpp/add.pb.h`, `client/cpp/add.pb.cc`
+- `client/cpp/add.grpc.pb.h`, `client/cpp/add.grpc.pb.cc`
+
+2. Compile the client:
+
+```bash
+c++ -std=c++17 \
+  -Iclient/cpp \
+  client/cpp/client.cpp client/cpp/add.pb.cc client/cpp/add.grpc.pb.cc \
+  $(pkg-config --cflags --libs grpc++ protobuf) \
+  -o client/cpp/client_cpp
+```
+
+If you still have `client/cpp/client.cc`, you can compile it instead by replacing `client.cpp` with `client.cc` in the command above.
+
+### Run the C++ client
+
+```bash
+GRPC_HOST=localhost ./client/cpp/client_cpp
+```
+
+TLS and mTLS are controlled by the same environment variables described above (`GRPC_TLS`, `GRPC_MTLS`, `GRPC_ROOT_CERT`, `GRPC_CLIENT_CERT`, `GRPC_CLIENT_KEY`, etc.).
+
 ## Configuration
 
 Environment variables supported by the server:
