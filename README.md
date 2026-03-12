@@ -290,3 +290,29 @@ Environment variables supported by the server:
 Environment variables supported by the client:
 - `GRPC_HOST` (default `localhost`)
 - `GRPC_PORT` (default `50051`)
+
+## Pushing to GitHub
+
+GitHub no longer accepts passwords for HTTPS `git push`. Use a **Personal Access Token (PAT)** instead.
+
+### Generate a classic token
+
+1. Go to https://github.com/settings/tokens → **Generate new token (classic)**
+2. Select scope: `repo`
+3. Copy the token
+
+### Store the token (one-time setup)
+
+```bash
+git config --global credential.helper store
+```
+
+Then push — when prompted, enter your GitHub username and paste the token as the password:
+
+```bash
+git push
+# Username: oscarso
+# Password: <paste your classic token here>
+```
+
+The token is saved to `~/.git-credentials` and you will not be prompted again.
