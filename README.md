@@ -74,6 +74,91 @@ This produces:
 - `GRPC_ROOT_CERT` (client and REST->gRPC)
   - default: `certs/server.crt`
 
+### Mutual TLS (mTLS)
+
+Mutual TLS means **both sides authenticate**:
+- the client verifies the server certificate
+- the server also verifies a **client certificate**
+
+Why `client.key` is needed: in mTLS the client must prove it **owns** the client certificate it presents. The private key (`client.key`) is used during the TLS handshake to provide proof-of-possession (authentication). The certificate file (`client.crt`) alone is not enough.
+
+To enable mTLS:
+
+```bash
+GRPC_MTLS=1 python3 server/server.py
+```
+
+In mTLS mode, this project expects:
+- a local CA certificate at `certs/ca.crt`
+- a server certificate/key at `certs/server.crt` + `certs/server.key` signed by that CA
+- a client certificate/key at `certs/client.crt` + `certs/client.key` signed by that CA
+
+#### Generate local dev CA + server cert + client cert
+
+From the repository root:
+
+```bash
+mkdir -p certs
+
+# 1) Create a local CA
+openssl genrsa -out certs/ca.key 2048
+openssl req -x509 -new -nodes -key certs/ca.key -sha256 -days 3650 \
+  -out certs/ca.crt \
+  -subj "/CN=Local Dev CA"
+
+# 2) Server key + CSR
+openssl genrsa -out certs/server.key 2048
+openssl req -new -key certs/server.key -out certs/server.csr -subj "/CN=localhost"
+
+# 3) Sign server CSR with CA (includes SAN=localhost)
+openssl x509 -req -in certs/server.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
+  -out certs/server.crt -days 365 -sha256 \
+  -extfile <(printf "subjectAltName=DNS:localhost")
+
+# 4) Client key + CSR
+openssl genrsa -out certs/client.key 2048
+openssl req -new -key certs/client.key -out certs/client.csr -subj "/CN=grpc-client"
+
+# 5) Sign client CSR with CA
+openssl x509 -req -in certs/client.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
+  -out certs/client.crt -days 365 -sha256
+```
+
+Note: the `extfile <(...)` syntax uses process substitution (works in `zsh`).
+
+After running the commands above, your `certs/` folder should contain (at minimum):
+
+- **CA (used to sign and to verify)**
+  - `certs/ca.crt`
+  - `certs/ca.key`
+- **Server identity (presented by gRPC server)**
+  - `certs/server.crt`
+  - `certs/server.key`
+- **Client identity (presented by gRPC client)**
+  - `certs/client.crt`
+  - `certs/client.key`
+
+It will also contain intermediate artifacts created during signing:
+
+- `certs/server.csr`
+- `certs/client.csr`
+- `certs/ca.srl`
+
+#### mTLS-related environment variables
+
+- `GRPC_MTLS`
+  - `1` enables mTLS (default `0`)
+- `GRPC_CLIENT_CA_CERT` (server)
+  - CA certificate used by the server to verify client certs
+  - default: `certs/ca.crt`
+- `GRPC_ROOT_CERT` (client and REST->gRPC)
+  - CA certificate used by the client to verify the server cert
+  - default when `GRPC_MTLS=1`: `certs/ca.crt`
+- `GRPC_CLIENT_CERT` (client and REST->gRPC)
+  - default: `certs/client.crt`
+- `GRPC_CLIENT_KEY` (client and REST->gRPC)
+  - default: `certs/client.key`
+
 ## Run the server
 
 ```bash

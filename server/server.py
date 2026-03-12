@@ -57,6 +57,10 @@ def _tls_enabled() -> bool:
     return os.environ.get("GRPC_TLS", "1").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _mtls_enabled() -> bool:
+    return os.environ.get("GRPC_MTLS", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _read_file_bytes(path: str) -> bytes:
     with open(path, "rb") as f:
         return f.read()
@@ -80,13 +84,38 @@ def _grpc_server_credentials() -> grpc.ServerCredentials:
 
     private_key = _read_file_bytes(key_path)
     certificate_chain = _read_file_bytes(cert_path)
+
+    if _mtls_enabled():
+        client_ca_path = os.environ.get(
+            "GRPC_CLIENT_CA_CERT",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "certs", "ca.crt")),
+        )
+        if not os.path.exists(client_ca_path):
+            raise FileNotFoundError(
+                "mTLS is enabled but the client CA certificate is missing. "
+                f"Expected GRPC_CLIENT_CA_CERT={client_ca_path}"
+            )
+        client_ca = _read_file_bytes(client_ca_path)
+        return grpc.ssl_server_credentials(
+            ((private_key, certificate_chain),),
+            root_certificates=client_ca,
+            require_client_auth=True,
+        )
+
     return grpc.ssl_server_credentials(((private_key, certificate_chain),))
 
 
 def _grpc_channel_credentials() -> grpc.ChannelCredentials:
     root_cert_path = os.environ.get(
         "GRPC_ROOT_CERT",
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "certs", "server.crt")),
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "certs",
+                "ca.crt" if _mtls_enabled() else "server.crt",
+            )
+        ),
     )
     if not os.path.exists(root_cert_path):
         raise FileNotFoundError(
@@ -94,6 +123,29 @@ def _grpc_channel_credentials() -> grpc.ChannelCredentials:
             f"Expected GRPC_ROOT_CERT={root_cert_path}"
         )
     root_certs = _read_file_bytes(root_cert_path)
+
+    if _mtls_enabled():
+        client_cert_path = os.environ.get(
+            "GRPC_CLIENT_CERT",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "certs", "client.crt")),
+        )
+        client_key_path = os.environ.get(
+            "GRPC_CLIENT_KEY",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "certs", "client.key")),
+        )
+        if not os.path.exists(client_cert_path) or not os.path.exists(client_key_path):
+            raise FileNotFoundError(
+                "mTLS is enabled but client certificate/key files are missing (used by the REST->gRPC client). "
+                f"Expected GRPC_CLIENT_CERT={client_cert_path} and GRPC_CLIENT_KEY={client_key_path}"
+            )
+        client_cert = _read_file_bytes(client_cert_path)
+        client_key = _read_file_bytes(client_key_path)
+        return grpc.ssl_channel_credentials(
+            root_certificates=root_certs,
+            private_key=client_key,
+            certificate_chain=client_cert,
+        )
+
     return grpc.ssl_channel_credentials(root_certificates=root_certs)
 
 
