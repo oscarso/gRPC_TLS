@@ -38,11 +38,49 @@ source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
+## TLS for gRPC (server <-> client)
+
+The gRPC server and client are configured to use **TLS by default** (`GRPC_TLS=1`).
+
+Important: this TLS setting applies to the **gRPC connection** on `localhost:50051`. The REST API is a separate Flask server and will still be served over **HTTP** (you will see `http://localhost:5000`), unless you separately enable HTTPS for Flask or run it behind a reverse proxy that terminates TLS.
+
+### Generate a local dev certificate (self-signed)
+
+From the repository root:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout certs/server.key \
+  -out certs/server.crt \
+  -days 365 \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost"
+```
+
+This produces:
+- `certs/server.key` (server private key)
+- `certs/server.crt` (server certificate; also used as the client "root" cert for local dev)
+
+### TLS-related environment variables
+
+- `GRPC_TLS`
+  - `1` (default) enables TLS
+  - `0` disables TLS (insecure)
+- `GRPC_SERVER_CERT` (server only)
+  - default: `certs/server.crt`
+- `GRPC_SERVER_KEY` (server only)
+  - default: `certs/server.key`
+- `GRPC_ROOT_CERT` (client and REST->gRPC)
+  - default: `certs/server.crt`
+
 ## Run the server
 
 ```bash
 python3 server/server.py
 ```
+
+Note: the REST API is plain HTTP, but it forwards requests to the gRPC server using TLS (when `GRPC_TLS=1`).
 
 ### Debug logging (print every call)
 

@@ -53,6 +53,50 @@ def _debug_enabled() -> bool:
     return os.environ.get("DEBUG_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _tls_enabled() -> bool:
+    return os.environ.get("GRPC_TLS", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _read_file_bytes(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _grpc_server_credentials() -> grpc.ServerCredentials:
+    cert_path = os.environ.get(
+        "GRPC_SERVER_CERT",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "certs", "server.crt")),
+    )
+    key_path = os.environ.get(
+        "GRPC_SERVER_KEY",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "certs", "server.key")),
+    )
+
+    if not os.path.exists(cert_path) or not os.path.exists(key_path):
+        raise FileNotFoundError(
+            "TLS is enabled but server certificate/key files are missing. "
+            f"Expected GRPC_SERVER_CERT={cert_path} and GRPC_SERVER_KEY={key_path}"
+        )
+
+    private_key = _read_file_bytes(key_path)
+    certificate_chain = _read_file_bytes(cert_path)
+    return grpc.ssl_server_credentials(((private_key, certificate_chain),))
+
+
+def _grpc_channel_credentials() -> grpc.ChannelCredentials:
+    root_cert_path = os.environ.get(
+        "GRPC_ROOT_CERT",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "certs", "server.crt")),
+    )
+    if not os.path.exists(root_cert_path):
+        raise FileNotFoundError(
+            "TLS is enabled but root certificate is missing. "
+            f"Expected GRPC_ROOT_CERT={root_cert_path}"
+        )
+    root_certs = _read_file_bytes(root_cert_path)
+    return grpc.ssl_channel_credentials(root_certificates=root_certs)
+
+
 _logger = logging.getLogger("grpc_tls")
 if _debug_enabled():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -71,7 +115,10 @@ class Adder(add_pb2_grpc.AdderServicer):
 def serve_grpc(host: str, port: int) -> grpc.Server:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     add_pb2_grpc.add_AdderServicer_to_server(Adder(), server)
-    server.add_insecure_port(f"{host}:{port}")
+    if _tls_enabled():
+        server.add_secure_port(f"{host}:{port}", _grpc_server_credentials())
+    else:
+        server.add_insecure_port(f"{host}:{port}")
     server.start()
     return server
 
@@ -123,7 +170,13 @@ def create_rest_app(grpc_host: str, grpc_port: int) -> Flask:
         except (TypeError, ValueError):
             return jsonify({"error": "a and b must be integers"}), 400
 
-        with grpc.insecure_channel(f"{grpc_host}:{grpc_port}") as channel:
+        if _tls_enabled():
+            creds = _grpc_channel_credentials()
+            channel = grpc.secure_channel(f"{grpc_host}:{grpc_port}", creds)
+        else:
+            channel = grpc.insecure_channel(f"{grpc_host}:{grpc_port}")
+
+        with channel:
             stub = add_pb2_grpc.AdderStub(channel)
             reply = stub.Add(add_pb2.AddRequest(a=a, b=b))
         return jsonify({"result": int(reply.result)})

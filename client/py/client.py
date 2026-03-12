@@ -37,6 +37,30 @@ def _maybe_generate_grpc_stubs() -> None:
         raise RuntimeError(f"protoc failed with exit code {rc}")
 
 
+def _tls_enabled() -> bool:
+    return os.environ.get("GRPC_TLS", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _read_file_bytes(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _grpc_channel_credentials() -> grpc.ChannelCredentials:
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    root_cert_path = os.environ.get(
+        "GRPC_ROOT_CERT",
+        os.path.abspath(os.path.join(repo_root, "certs", "server.crt")),
+    )
+    if not os.path.exists(root_cert_path):
+        raise FileNotFoundError(
+            "TLS is enabled but root certificate is missing. "
+            f"Expected GRPC_ROOT_CERT={root_cert_path}"
+        )
+    root_certs = _read_file_bytes(root_cert_path)
+    return grpc.ssl_channel_credentials(root_certificates=root_certs)
+
+
 def _prompt_int(name: str) -> int:
     while True:
         raw = input(f"Enter integer {name}: ").strip()
@@ -65,7 +89,14 @@ def main() -> None:
     b = _prompt_int("b")
 
     target = f"{args.host}:{args.port}"
-    with grpc.insecure_channel(target) as channel:
+
+    if _tls_enabled():
+        creds = _grpc_channel_credentials()
+        channel = grpc.secure_channel(target, creds)
+    else:
+        channel = grpc.insecure_channel(target)
+
+    with channel:
         stub = add_pb2_grpc.AdderStub(channel)
         reply = stub.Add(add_pb2.AddRequest(a=a, b=b))
 
