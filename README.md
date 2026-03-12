@@ -215,7 +215,17 @@ There is also a native client implementation at `client/cpp/client.cpp` that beh
 
 ### Build the C++ client
 
-You need `protoc`, the gRPC C++ plugin, and the gRPC/protobuf libraries available on your system.
+You need the following tools and libraries installed:
+
+- **`protoc`** — Protocol Buffers compiler
+- **`grpc_cpp_plugin`** — gRPC C++ protoc plugin
+- **gRPC/protobuf C++ libraries** — headers and `.pc` files consumed by `pkg-config`
+
+On Ubuntu/Debian, install with:
+
+```bash
+sudo apt install -y protobuf-compiler protobuf-compiler-grpc libgrpc++-dev libgrpc-dev libprotobuf-dev
+```
 
 1. Generate C++ protobuf + gRPC sources from `proto/add.proto`:
 
@@ -243,8 +253,28 @@ c++ -std=c++17 \
 
 ### Run the C++ client
 
+Start the server first (from the repo root). With TLS (default):
+
+```bash
+python3 server/server.py
+```
+
+With mTLS:
+
+```bash
+GRPC_MTLS=1 python3 server/server.py
+```
+
+Then run the client. With TLS (default):
+
 ```bash
 GRPC_HOST=localhost ./client/cpp/client_exe
+```
+
+With mTLS (from the repo root):
+
+```bash
+GRPC_MTLS=1 ./client/cpp/client_exe
 ```
 
 TLS and mTLS are controlled by the same environment variables described above (`GRPC_TLS`, `GRPC_MTLS`, `GRPC_ROOT_CERT`, `GRPC_CLIENT_CERT`, `GRPC_CLIENT_KEY`, etc.).
