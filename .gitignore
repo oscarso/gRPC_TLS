@@ -1,3 +1,8 @@
+# gRPC build artifacts
+client/tpm/grpc/*.tar.gz
+client/tpm/grpc/grpc-*/
+client/tpm/grpc/install/
+
 # SoftHSMv2 and OpenSSL build artifacts
 client/tpm/*.tar.gz
 client/tpm/ossl3/*.tar.gz

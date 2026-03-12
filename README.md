@@ -206,6 +206,14 @@ Optional flags:
 python3 client/py/client.py --host localhost --port 50051
 ```
 
+> **Note — Python client and TPM keys:** `client/py/client.py` uses the `grpcio` pip package,
+> which bundles **BoringSSL** internally and does **not** use the system or local OpenSSL.
+> To use a TPM/HSM key (e.g. from SoftHSMv2 via the pkcs11 provider) for TLS in Python gRPC code,
+> `grpcio` must be **rebuilt from source** against the local OpenSSL 3.5.5 with
+> `GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1`. This task has **not** been done — the Python client
+> currently reads cert/key files from disk and cannot access SoftHSMv2 keys.
+> The **C++ client** (`client/cpp/client.cpp`) is the recommended path for HSM-backed TLS.
+
 ## Native C++ gRPC client
 
 There is also a native client implementation at `client/cpp/client.cpp` that behaves like the Python client:
@@ -215,25 +223,24 @@ There is also a native client implementation at `client/cpp/client.cpp` that beh
 
 ### Build the C++ client
 
-You need the following tools and libraries installed:
+The C++ client is built against the **locally built gRPC 1.78.1 + OpenSSL 3.5.5** under
+`client/tpm/grpc/install` and `client/tpm/ossl3/install`. See the
+[gRPC 1.78.1 build section](#grpc-1781-built-against-openssl-355) for how to build those first.
 
-- **`protoc`** — Protocol Buffers compiler
-- **`grpc_cpp_plugin`** — gRPC C++ protoc plugin
-- **gRPC/protobuf C++ libraries** — headers and `.pc` files consumed by `pkg-config`
-
-On Ubuntu/Debian, install with:
+Set path variables (run from repo root):
 
 ```bash
-sudo apt install -y protobuf-compiler protobuf-compiler-grpc libgrpc++-dev libgrpc-dev libprotobuf-dev
+GRPC=$(pwd)/client/tpm/grpc/install
+OSSL=$(pwd)/client/tpm/ossl3/install
 ```
 
-1. Generate C++ protobuf + gRPC sources from `proto/add.proto`:
+1. Generate C++ protobuf + gRPC sources from `proto/add.proto` using the local `protoc`:
 
 ```bash
-protoc -I proto \
+$GRPC/bin/protoc -I proto \
   --cpp_out=client/cpp \
   --grpc_out=client/cpp \
-  --plugin=protoc-gen-grpc=$(which grpc_cpp_plugin) \
+  --plugin=protoc-gen-grpc=$GRPC/bin/grpc_cpp_plugin \
   proto/add.proto
 ```
 
@@ -245,10 +252,58 @@ This will create:
 
 ```bash
 c++ -std=c++17 \
-  -Iclient/cpp \
+  -Iclient/cpp -I$GRPC/include -I$OSSL/include \
   client/cpp/client.cpp client/cpp/add.pb.cc client/cpp/add.grpc.pb.cc \
-  $(pkg-config --cflags --libs grpc++ protobuf) \
+  -L$GRPC/lib -L$OSSL/lib64 \
+  -Wl,--start-group \
+  -lgrpc++ -lgrpc -lgpr -lprotobuf \
+  -lupb -lupb_message_lib -lupb_base_lib -lupb_mem_lib -lupb_wire_lib \
+  -lupb_mini_table_lib -lupb_mini_descriptor_lib -lupb_hash_lib \
+  -laddress_sorting -lcares -lre2 -lz \
+  -labsl_synchronization -labsl_strings -labsl_str_format_internal \
+  -labsl_status -labsl_statusor \
+  -labsl_cord -labsl_cord_internal -labsl_cordz_info \
+  -labsl_cordz_functions -labsl_cordz_handle \
+  -labsl_base -labsl_spinlock_wait -labsl_raw_logging_internal -labsl_log_severity \
+  -labsl_time -labsl_time_zone -labsl_civil_time \
+  -labsl_int128 -labsl_strings_internal -labsl_string_view \
+  -labsl_throw_delegate -labsl_malloc_internal \
+  -labsl_stacktrace -labsl_symbolize -labsl_debugging_internal \
+  -labsl_demangle_internal -labsl_demangle_rust \
+  -labsl_decode_rust_punycode -labsl_utf8_for_code_point \
+  -labsl_graphcycles_internal -labsl_kernel_timeout_internal \
+  -labsl_hash -labsl_city -labsl_low_level_hash \
+  -labsl_raw_hash_set -labsl_hashtablez_sampler \
+  -labsl_random_distributions -labsl_random_seed_sequences \
+  -labsl_random_internal_entropy_pool -labsl_random_internal_randen \
+  -labsl_random_internal_randen_hwaes -labsl_random_internal_randen_hwaes_impl \
+  -labsl_random_internal_randen_slow -labsl_random_internal_platform \
+  -labsl_random_internal_seed_material -labsl_random_seed_gen_exception \
+  -labsl_log_internal_check_op -labsl_log_internal_conditions \
+  -labsl_log_internal_message -labsl_examine_stack \
+  -labsl_log_internal_format -labsl_log_internal_nullguard \
+  -labsl_log_internal_log_sink_set -labsl_log_internal_globals \
+  -labsl_log_sink -labsl_log_globals -labsl_vlog_config_internal \
+  -labsl_log_internal_fnmatch -labsl_strerror -labsl_leak_check \
+  -labsl_exponential_biased -labsl_crc32c -labsl_crc_internal \
+  -labsl_crc_cpu_detect -labsl_crc_cord_state -labsl_tracing_internal \
+  -labsl_log_internal_structured_proto -labsl_log_internal_proto \
+  -labsl_flags_internal -labsl_flags_reflection \
+  -labsl_flags_private_handle_accessor \
+  -labsl_flags_commandlineflag -labsl_flags_commandlineflag_internal \
+  -labsl_flags_config -labsl_flags_program_name -labsl_flags_marshalling \
+  -lutf8_range -lutf8_validity -lutf8_range_lib \
+  -lssl -lcrypto -lpthread -ldl -lrt \
+  -Wl,--end-group \
+  -Wl,-rpath,$GRPC/lib -Wl,-rpath,$OSSL/lib64 \
   -o client/cpp/client_exe
+```
+
+Verify it links against local OpenSSL 3.5.5:
+
+```bash
+ldd client/cpp/client_exe | grep ssl
+# libssl.so.3 => .../client/tpm/ossl3/install/lib64/libssl.so.3
 ```
 
 ### Run the C++ client
@@ -521,6 +576,96 @@ SOFTHSM2_CONF=client/tpm/softhsm2.conf \
   --module client/tpm/install/lib/softhsm/libsofthsm2.so \
   --token-label mytoken --pin 1234 \
   --list-objects
+```
+
+## gRPC 1.78.1 (built against OpenSSL 3.5.5)
+
+> **Status:**
+> - ✅ **gRPC 1.78.1 C++ libraries** built and installed at `client/tpm/grpc/install/` against OpenSSL 3.5.5.
+> - ✅ **`client/cpp/client_exe`** recompiled and verified to link against local OpenSSL 3.5.5.
+> - ⏳ **`grpcio` (Python)** — rebuilding `grpcio` against OpenSSL 3.5.5 is **required** for any
+>   Python gRPC code that wishes to access a TPM/HSM key via the pkcs11 provider. This has
+>   **not yet been done**. It requires building `grpcio` from source with
+>   `GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 GRPC_PYTHON_BUILD_SYSTEM_ABSL=1` pointed at the local
+>   OpenSSL 3.5.5 install.
+
+The system gRPC 1.30.2 on Ubuntu 22.04 is linked against OpenSSL 3.0.2. To use the
+pkcs11 provider (which requires OpenSSL ≥ 3.0.7), gRPC must be rebuilt against the
+local OpenSSL 3.5.5 install.
+
+### Directory layout
+
+```
+client/tpm/grpc/
+  grpc-1.78.1/          # gRPC source + submodules (git clone)
+  install/              # gRPC 1.78.1 install
+    bin/
+      grpc_cpp_plugin
+      protoc
+    lib/
+      libgrpc.a
+      libgrpc++.a
+      pkgconfig/
+        grpc.pc
+        grpc++.pc
+```
+
+### Build dependencies
+
+```bash
+sudo apt install -y cmake build-essential git
+```
+
+### Clone with submodules
+
+> **Note:** `client/tpm/grpc/grpc-1.78.1/` is listed in `.gitignore` — it must be cloned manually.
+
+```bash
+mkdir -p client/tpm/grpc
+git clone --recurse-submodules -b v1.78.1 --depth 1 \
+  https://github.com/grpc/grpc \
+  client/tpm/grpc/grpc-1.78.1
+```
+
+### Configure against local OpenSSL 3.5.5
+
+```bash
+OSSL=$(pwd)/client/tpm/ossl3/install
+
+cmake -S client/tpm/grpc/grpc-1.78.1 \
+  -B client/tpm/grpc/grpc-1.78.1/cmake_build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=$(pwd)/client/tpm/grpc/install \
+  -DCMAKE_PREFIX_PATH=$OSSL \
+  -DOPENSSL_ROOT_DIR=$OSSL \
+  -DOPENSSL_INCLUDE_DIR=$OSSL/include \
+  -DOPENSSL_CRYPTO_LIBRARY=$OSSL/lib64/libcrypto.so \
+  -DOPENSSL_SSL_LIBRARY=$OSSL/lib64/libssl.so \
+  -DgRPC_SSL_PROVIDER=package \
+  -DgRPC_BUILD_TESTS=OFF \
+  -DgRPC_INSTALL=ON \
+  -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,$OSSL/lib64" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath,$OSSL/lib64"
+```
+
+Verify OpenSSL 3.5.5 was picked up:
+```
+-- Found OpenSSL: .../client/tpm/ossl3/install/lib64/libcrypto.so (found version "3.5.5")
+```
+
+### Build and install
+
+```bash
+cmake --build client/tpm/grpc/grpc-1.78.1/cmake_build --parallel $(nproc)
+cmake --install client/tpm/grpc/grpc-1.78.1/cmake_build
+```
+
+### Verify
+
+```bash
+PKG_CONFIG_PATH=client/tpm/grpc/install/lib/pkgconfig \
+  pkg-config --modversion grpc++
+# 1.78.1
 ```
 
 ## Pushing to GitHub
