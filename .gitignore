@@ -1,0 +1,23 @@
+# SoftHSMv2 and OpenSSL build artifacts
+client/tpm/*.tar.gz
+client/tpm/ossl3/*.tar.gz
+client/tpm/ossl3/openssl-*/
+client/tpm/ossl3/install/
+client/tpm/softhsm-SoftHSMv2-*/
+client/tpm/install/
+client/tpm/p11prov/*.tar.gz
+client/tpm/p11prov/pkcs11-provider-*/
+client/tpm/p11prov/install/
+client/tpm/tokens/
+
+# Generated C++ protobuf stubs
+client/cpp/add.pb.cc
+client/cpp/add.pb.h
+client/cpp/add.grpc.pb.cc
+client/cpp/add.grpc.pb.h
+client/cpp/client_exe
+
+# Python
+__pycache__/
+*.pyc
+.venv/

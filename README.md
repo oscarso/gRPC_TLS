@@ -485,6 +485,44 @@ OPENSSL_CONF=client/tpm/ossl3/install/ssl/openssl.cnf \
 > **Note:** Always run from the repo root so relative paths in `softhsm2.conf` resolve correctly.
 > Use absolute paths in `openssl.cnf` for `module` and `pkcs11-module-path`.
 
+---
+
+### 8. List all keys/objects on the token
+
+Use `openssl storeutl` with a token-level PKCS#11 URI:
+
+```bash
+SOFTHSM2_CONF=client/tpm/softhsm2.conf \
+LD_LIBRARY_PATH=client/tpm/ossl3/install/lib64 \
+OPENSSL_CONF=client/tpm/ossl3/install/ssl/openssl.cnf \
+  client/tpm/ossl3/install/bin/openssl storeutl \
+  -provider pkcs11 -provider default \
+  -noout -text \
+  "pkcs11:token=mytoken?pin-value=1234"
+```
+
+Example output:
+```
+0: Public key
+   PKCS11 EC Public Key (256 bits) — mykey (prime256v1)
+
+1: Pkey
+   PKCS11 EC Private Key (256 bits) — [not exportable]
+   URI pkcs11:...;token=mytoken;id=%01;object=mykey;type=private
+
+Total found: 2
+```
+
+Alternatively, use `pkcs11-tool` (simpler):
+
+```bash
+SOFTHSM2_CONF=client/tpm/softhsm2.conf \
+  pkcs11-tool \
+  --module client/tpm/install/lib/softhsm/libsofthsm2.so \
+  --token-label mytoken --pin 1234 \
+  --list-objects
+```
+
 ## Pushing to GitHub
 
 GitHub no longer accepts passwords for HTTPS `git push`. Use a **Personal Access Token (PAT)** instead.
