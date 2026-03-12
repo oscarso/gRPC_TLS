@@ -291,6 +291,198 @@ Environment variables supported by the client:
 - `GRPC_HOST` (default `localhost`)
 - `GRPC_PORT` (default `50051`)
 
+## SoftHSMv2 + OpenSSL 3.5.5 + pkcs11-provider (PKCS#11 via OpenSSL provider)
+
+`client/tpm/` contains local builds of SoftHSMv2, OpenSSL 3.5.5, and pkcs11-provider,
+enabling P-256 key generation and access via the OpenSSL 3 provider API (no engine).
+
+### Directory layout
+
+```
+client/tpm/
+  install/                        # SoftHSMv2 2.7.0 install
+    bin/softhsm2-util
+    lib/softhsm/libsofthsm2.so    # PKCS#11 shared library
+  ossl3/
+    openssl-3.5.5/                # OpenSSL 3.5.5 source
+    install/                      # OpenSSL 3.5.5 install
+      bin/openssl
+      lib64/
+        libcrypto.so.3
+        libssl.so.3
+        ossl-modules/
+          pkcs11.so               # pkcs11-provider 1.2.0
+      ssl/openssl.cnf             # configured to load pkcs11 provider
+  p11prov/
+    pkcs11-provider-main/         # pkcs11-provider source (main branch)
+    install/
+  softhsm2.conf                   # SoftHSM config (tokendir = client/tpm/tokens/)
+  tokens/                         # initialised token storage
+```
+
+---
+
+### 1. Build SoftHSMv2 2.7.0
+
+Install build dependencies:
+
+```bash
+sudo apt install -y libssl-dev automake autoconf libtool
+```
+
+Download and build (installs to `client/tpm/install/`):
+
+```bash
+mkdir -p client/tpm
+curl -L https://api.github.com/repos/softhsm/SoftHSMv2/tarball/2.7.0 \
+  -o client/tpm/SoftHSMv2-2.7.0.tar.gz
+tar -xzf client/tpm/SoftHSMv2-2.7.0.tar.gz -C client/tpm/
+cd client/tpm/softhsm-SoftHSMv2-*
+sh autogen.sh
+./configure --prefix=$(pwd)/../install
+make -j$(nproc)
+make install
+```
+
+---
+
+### 2. Build OpenSSL 3.5.5
+
+Ubuntu 22.04 ships OpenSSL 3.0.2 which is too old for pkcs11-provider (requires ≥ 3.0.7).
+Build OpenSSL 3.5.5 locally (installs to `client/tpm/ossl3/install/`):
+
+```bash
+mkdir -p client/tpm/ossl3
+curl -L https://github.com/openssl/openssl/releases/download/openssl-3.5.5/openssl-3.5.5.tar.gz \
+  -o client/tpm/ossl3/openssl-3.5.5.tar.gz
+tar -xzf client/tpm/ossl3/openssl-3.5.5.tar.gz -C client/tpm/ossl3/
+cd client/tpm/ossl3/openssl-3.5.5
+./config --prefix=$(pwd)/../install --openssldir=$(pwd)/../install/ssl
+make -j$(nproc)
+make install
+```
+
+Verify:
+
+```bash
+LD_LIBRARY_PATH=client/tpm/ossl3/install/lib64 \
+  client/tpm/ossl3/install/bin/openssl version
+# OpenSSL 3.5.5 27 Jan 2026
+```
+
+---
+
+### 3. Build pkcs11-provider 1.2.0
+
+Install build dependencies:
+
+```bash
+sudo apt install -y meson libp11-kit-dev pkg-config
+```
+
+Download and build against local OpenSSL 3.5.5:
+
+```bash
+mkdir -p client/tpm/p11prov
+curl -L https://github.com/latchset/pkcs11-provider/archive/refs/heads/main.tar.gz \
+  -o client/tpm/p11prov/pkcs11-provider-main.tar.gz
+tar -xzf client/tpm/p11prov/pkcs11-provider-main.tar.gz -C client/tpm/p11prov/
+cd client/tpm/p11prov/pkcs11-provider-main
+PKG_CONFIG_PATH=$(pwd)/../../ossl3/install/lib64/pkgconfig \
+  meson setup builddir --prefix=$(pwd)/../install
+meson compile -C builddir
+meson install -C builddir
+```
+
+`pkcs11.so` is installed directly into OpenSSL's modules directory:
+`client/tpm/ossl3/install/lib64/ossl-modules/pkcs11.so`
+
+---
+
+### 4. Configure OpenSSL to load the pkcs11 provider
+
+Edit `client/tpm/ossl3/install/ssl/openssl.cnf` — add `pkcs11` to `[provider_sect]`
+and add `[pkcs11_sect]` pointing at `libsofthsm2.so`:
+
+```ini
+[provider_sect]
+default = default_sect
+pkcs11 = pkcs11_sect
+
+[default_sect]
+activate = 1
+
+[pkcs11_sect]
+module = /path/to/client/tpm/ossl3/install/lib64/ossl-modules/pkcs11.so
+pkcs11-module-path = /path/to/client/tpm/install/lib/softhsm/libsofthsm2.so
+activate = 1
+```
+
+Verify both providers load:
+
+```bash
+LD_LIBRARY_PATH=client/tpm/ossl3/install/lib64 \
+OPENSSL_CONF=client/tpm/ossl3/install/ssl/openssl.cnf \
+  client/tpm/ossl3/install/bin/openssl list -providers
+# Providers:
+#   default   (OpenSSL Default Provider 3.5.5) active
+#   pkcs11    (PKCS#11 Provider 1.2.0)         active
+```
+
+---
+
+### 5. Initialise a SoftHSMv2 token
+
+```bash
+mkdir -p client/tpm/tokens
+cat > client/tpm/softhsm2.conf <<EOF
+directories.tokendir = $(pwd)/client/tpm/tokens
+objectstore.backend = file
+EOF
+
+SOFTHSM2_CONF=client/tpm/softhsm2.conf \
+  client/tpm/install/bin/softhsm2-util \
+  --init-token --free \
+  --label "mytoken" \
+  --pin 1234 --so-pin 12345678
+```
+
+---
+
+### 6. Generate a P-256 (EC) key on the token
+
+Uses `pkcs11-tool` from the `opensc` package:
+
+```bash
+sudo apt install -y opensc
+
+SOFTHSM2_CONF=client/tpm/softhsm2.conf \
+  pkcs11-tool \
+  --module client/tpm/install/lib/softhsm/libsofthsm2.so \
+  --token-label mytoken --pin 1234 \
+  --keypairgen --key-type EC:prime256v1 \
+  --label mykey --id 01
+```
+
+---
+
+### 7. Access the key via OpenSSL pkcs11 provider
+
+Export the public key using a PKCS#11 URI (no engine):
+
+```bash
+SOFTHSM2_CONF=client/tpm/softhsm2.conf \
+LD_LIBRARY_PATH=client/tpm/ossl3/install/lib64 \
+OPENSSL_CONF=client/tpm/ossl3/install/ssl/openssl.cnf \
+  client/tpm/ossl3/install/bin/openssl pkey \
+  -provider pkcs11 -provider default \
+  -in "pkcs11:token=mytoken;object=mykey;type=private?pin-value=1234" \
+  -pubout -text
+```
+
+> **Note:** Always run from the repo root so relative paths in `softhsm2.conf` resolve correctly.
+> Use absolute paths in `openssl.cnf` for `module` and `pkcs11-module-path`.
+
 ## Pushing to GitHub
 
 GitHub no longer accepts passwords for HTTPS `git push`. Use a **Personal Access Token (PAT)** instead.
