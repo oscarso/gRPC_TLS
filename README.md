@@ -349,7 +349,9 @@ make install
 ### 2. Build OpenSSL 3.5.5
 
 Ubuntu 22.04 ships OpenSSL 3.0.2 which is too old for pkcs11-provider (requires ≥ 3.0.7).
-Build OpenSSL 3.5.5 locally (installs to `client/tpm/ossl3/install/`):
+Build OpenSSL 3.5.5 locally (installs to `client/tpm/ossl3/install/`).
+
+> **Note:** The tarball (`openssl-3.5.5.tar.gz`) is listed in `.gitignore` and is **not committed to the repo** (it is ~51 MB). You must download it manually as shown below.
 
 ```bash
 mkdir -p client/tpm/ossl3
